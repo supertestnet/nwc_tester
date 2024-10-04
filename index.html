@@ -206,7 +206,7 @@
                     $( ".check_permissions_status" ).innerText = `error: ` + JSON.stringify( wallet_info[ "error" ] );
                     return;
                 }
-                $( ".check_permissions_status" ).innerText = `This NWC string has the following permissions: ${wallet_info.result.methods.join( " " )}\n\nFull response:\n\n${JSON.stringify( wallet_info.result )}`;
+                $( ".check_permissions_status" ).innerText = `This NWC string has the following permissions: ${wallet_info.result.methods.join( " " )}\n\nFull response:\n\n${JSON.stringify( wallet_info.result, null, 4 )}`;
             }
             $( '.make_invoice' ).onclick = async () => {
                 var nwc_string = $( '.make_invoice_div .nwc_string' ).value;
@@ -222,7 +222,7 @@
                     $( ".make_invoice_status" ).innerText = `error: ` + JSON.stringify( invoice_info[ "error" ] );
                     return;
                 }
-                $( ".make_invoice_status" ).innerText = `The invoice was successfully retrieved and is ${invoice_info.result.invoice || invoice_info.result.bolt11}\n\nFull response:\n\n${JSON.stringify( invoice_info.result )}`;
+                $( ".make_invoice_status" ).innerText = `The invoice was successfully retrieved and is ${invoice_info.result.invoice || invoice_info.result.bolt11}\n\nFull response:\n\n${JSON.stringify( invoice_info.result, null, 4 )}`;
             }
             $( '.check_invoice' ).onclick = async () => {
                 var nwc_string = $( '.check_invoice_div .nwc_string' ).value;
@@ -235,7 +235,7 @@
                     $( ".check_invoice_status" ).innerText = `error: ` + JSON.stringify( invoice_info[ "error" ] );
                     return;
                 }
-                $( ".check_invoice_status" ).innerText = `The invoice status was successfully retrieved and is "${( "settled_at" in invoice_info.result && !!invoice_info.result.settled_at ) ? "paid" : "not paid"}" (determined by checking the "settled_at" parameter given below -- if it exists and has a value, we say "paid," otherwise we say "not paid")\n\nFull response:\n\n${JSON.stringify( invoice_info.result )}`;
+                $( ".check_invoice_status" ).innerText = `The invoice status was successfully retrieved and is "${( "settled_at" in invoice_info.result && !!invoice_info.result.settled_at ) ? "paid" : "not paid"}" (determined by checking the "settled_at" parameter given below -- if it exists and has a value, we say "paid," otherwise we say "not paid")\n\nFull response:\n\n${JSON.stringify( invoice_info.result, null, 4 )}`;
             }
             $( '.pay_invoice' ).onclick = async () => {
                 var nwc_string = $( '.pay_invoice_div .nwc_string' ).value;
@@ -257,7 +257,7 @@
                     $( ".get_balance_status" ).innerText = `error: ` + JSON.stringify( balance_info[ "error" ] );
                     return;
                 }
-                $( ".get_balance_status" ).innerText = `The balance was successfully retrieved and is ${Math.floor( balance_info.result.balance / 1000 )} satoshis or ${balance_info.result.balance} millisatoshis\n\nFull response:\n\n${JSON.stringify( balance_info.result )}`;
+                $( ".get_balance_status" ).innerText = `The balance was successfully retrieved and is ${Math.floor( balance_info.result.balance / 1000 )} satoshis or ${balance_info.result.balance} millisatoshis\n\nFull response:\n\n${JSON.stringify( balance_info.result, null, 4 )}`;
             }
             $( '.list_transactions' ).onclick = async () => {
                 var nwc_string = $( '.list_transactions_div .nwc_string' ).value;
