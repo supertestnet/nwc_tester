@@ -1,135 +1,283 @@
 <!DOCTYPE html>
 <html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, user-scalable=no">
-    <script src="https://supertestnet.github.io/bitcoin-chess/js/bolt11.js"></script>
-    <script src="https://supertestnet.github.io/blind-sig-js/blindSigJS.js"></script>
-    <script src="https://supertestnet.github.io/bankify/super_nostr.js"></script>
-    <script src="https://supertestnet.github.io/bankify/bankify.js"></script>
-    <script src="https://bundle.run/browserify-cipher@1.0.1"></script>
-    <script src="https://bundle.run/noble-secp256k1@1.2.14"></script>
-    <style>
-        * {
-            box-sizing: border-box;
-            font-size: 1.15rem;
-            font-family: Arial, sans-serif;
-        }
-        html {
-            max-width: 800px;
-            padding: 3rem 1rem;
-            margin: auto;
-            line-height: 1.25;
-            padding: 0;
-        }
-        body {
-            margin: 3rem 1rem;
-        }
-        h1 {
-            font-size: 2rem;
-        }
-        h2 {
-            font-size: 1.5rem;
-        }
-        input {
-            line-height: 1.25;
-            width: 100%;
-            height: 1.8rem;
-            font-size: 1.15rem;
-            border: 1px solid grey;
-        }
-        .hidden {
-            display: none !important;
-        }
-        .invoice_box {
-            border: 1px solid black;
-            color: black;
-            font-family: monospace;
-            padding: 0.5rem;
-            max-width: 15rem;
-            word-wrap: break-word;
-        }
-        @media screen and (max-width: 600px) {
-        }
-    </style>
-</head>
-<body>
-    <center><h2 class="balance">0</h2></center></h1>
-    <center class="send_and_receive_btns hidden">
-        <button class="send">Send</button>
-        <button class="receive">Receive</button>
-    </center>
-    <center>
-        <p class="invoice_box hidden"></p>
-        <p class="checking_connection">Checking for nwc connection...</p>
-        <div class="nwc_btns hidden">
-            <br>
-            <button class="create_nwc_connection">Create NWC connection</button>
-            <br>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, user-scalable=no">
+        <script src="https://supertestnet.github.io/nwcjs/nwcjs.js"></script>
+        <script src="https://bundle.run/browserify-cipher@1.0.1"></script>
+        <script src="https://bundle.run/noble-secp256k1@1.2.14"></script>
+        <script src="https://bundle.run/bech32@2.0.0"></script>
+        <script>
+            var isValidHex = hex => {
+                if ( !hex ) return;
+                var length = hex.length;
+                if ( length % 2 ) return;
+                try {
+                    var bigint = BigInt( "0x" + hex, "hex" );
+                } catch( e ) {
+                    return;
+                }
+                var prepad = bigint.toString( 16 );
+                var i; for ( i=0; i<length; i++ ) prepad = "0" + prepad;
+                var padding = prepad.slice( -Math.abs( length ) );
+                return ( padding === hex );
+            }
+        </script>
+        <style>
+            * {
+                box-sizing: border-box;
+                font-size: 1.15rem;
+                font-family: Arial, sans-serif;
+            }
+            html {
+                max-width: 800px;
+                padding: 3rem 1rem;
+                margin: auto;
+                line-height: 1.25;
+                padding: 0;
+            }
+            body {
+                margin: 3rem 1rem;
+            }
+            h1 {
+                font-size: 2rem;
+            }
+            h2 {
+                font-size: 1.5rem;
+            }
+            input {
+                line-height: 1.25;
+                width: 100%;
+                height: 1.8rem;
+                font-size: 1.15rem;
+                border: 1px solid grey;
+            }
+            .testing_div {
+                padding: 1rem;
+                border: 1px solid black;
+                border-radius: 1rem;
+                margin-bottom: 1rem;
+                word-wrap: break-word;
+            }
+            .status_box, .status_box span {
+                font-family: monospace;
+                white-space: pre-wrap;
+            }
+            @media screen and (max-width: 600px) {
+            }
+        </style>
+        <script>
+            var $ = document.querySelector.bind( document );
+            var $$ = document.querySelectorAll.bind( document );
+            var url_params = new URLSearchParams( window.location.search );
+            var url_keys = url_params.keys();
+            var $_GET = {}
+            for ( var key of url_keys ) $_GET[ key ] = url_params.get( key );
+        </script>
+    </head>
+    <body>
+        <h1>NWC Tester</h1>
+        <div class="testing_div check_nwc_string_div">
+            <h2>Check NWC string</h2>
+            <p>Enter NWC string</p>
+            <p><input class="nwc_string"></p>
+            <p><button class="check_nwc_string">Submit</button></p>
+            <p class="status_box">Status: <span class="check_nwc_string_status">Not active yet</span></p>
         </div>
-        <div class="nwc_string_div"></div>
-    </center>
-    <script>
-        var $ = document.querySelector.bind( document );
-        var $$ = document.querySelectorAll.bind( document );
-        $( '.create_nwc_connection' ).onclick = () => {
-            var mint = prompt( `Pick a cashu mint from bitcoinmints.com (pick one that supports NUTS not MODULES) and enter its url here` );
-            if ( mint.includes( "..." ) ) return alert( `your mint url is invalid, be sure you clicked the clipboard icon on bitcoinmints.com -- if you just highlight + copy it won't work` );
-            if ( mint.startsWith( "fed1" ) ) return alert( `your mint is not a cashu mint, if you look on bitcoinmints.com you'll see you accidentally clicked on that supports MODULES and you need one that supports NUTS. Please try again` );
-            if ( !mint.startsWith( "https://" ) ) return alert( `your mint is not a cashu mint url, you must copy the mint's url and nothing else. Please try again` );
-            bankify.createNWCconnection( mint );
-        }
-        var showStringLoop = async () => {
-            if ( !Object.keys( bankify.state.nostr_state.nwc_info ).length ) {
-                await super_nostr.waitSomeSeconds( 1 );
-                $( '.checking_connection' ).classList.add( "hidden" );
-                $( '.nwc_btns' ).classList.remove( "hidden" );
-                showStringLoop();
-                return;
+        <div class="testing_div check_permissions_div">
+            <h2>Check permissions</h2>
+            <p>Enter NWC string</p>
+            <p><input class="nwc_string"></p>
+            <p><button class="check_permissions">Submit</button></p>
+            <p class="status_box">Status: <span class="check_permissions_status">Not active yet</span></p>
+        </div>
+        <div class="testing_div make_invoice_div">
+            <h2>Make invoice</h2>
+            <p>Enter NWC string</p>
+            <p><input class="nwc_string"></p>
+            <p>Invoice amount</p>
+            <p><input class="invoice_amnt" type="number" min="1" step="1"></p>
+            <p>Invoice description</p>
+            <p><input class="invoice_desc"></p>
+            <p><button class="make_invoice">Submit</button></p>
+            <p class="status_box">Status: <span class="make_invoice_status">Not active yet</span></p>
+        </div>
+        <div class="testing_div check_invoice_div">
+            <h2>Check invoice</h2>
+            <p>Enter NWC string</p>
+            <p><input class="nwc_string"></p>
+            <p>Enter invoice to check</p>
+            <p><input class="invoice_to_check"></p>
+            <p><button class="check_invoice">Submit</button></p>
+            <p class="status_box">Status: <span class="check_invoice_status">Not active yet</span></p>
+        </div>
+        <div class="testing_div pay_invoice_div">
+            <h2>Pay invoice</h2>
+            <p>Enter NWC string</p>
+            <p><input class="nwc_string"></p>
+            <p>Enter invoice to pay</p>
+            <p><input class="invoice_to_pay"></p>
+            <p><button class="pay_invoice">Submit</button></p>
+            <p class="status_box">Status: <span class="pay_invoice_status">Not active yet</span></p>
+        </div>
+        <div class="testing_div get_balance_div">
+            <h2>Get balance</h2>
+            <p>Enter NWC string</p>
+            <p><input class="nwc_string"></p>
+            <p><button class="get_balance">Submit</button></p>
+            <p class="status_box">Status: <span class="get_balance_status">Not active yet</span></p>
+        </div>
+        <div class="testing_div list_transactions_div">
+            <h2>List transactions</h2>
+            <p>Enter NWC string</p>
+            <p><input class="nwc_string"></p>
+            <p>Enter an optional "from" timestamp (no tx created before the specified timestamp will be returned -- use <a href="https://epochconverter.com" target="_blank">epochconverter.com</a> to convert a date/time to the 10-digit timestamp format needed here, also known as unix timestamp format)</p>
+            <p><input class="txs_from" type="number" min="1" step="1"></p>
+            <p>Enter an optional "to" timestamp (no tx created after the specified timestamp will be returned)</p>
+            <p><input class="txs_to" type="number" min="1" step="1"></p>
+            <p>Enter an optional limit (a number of txs equal to or smaller than your limit will be returned)</p>
+            <p><input class="limit" type="number" min="1" step="1"></p>
+            <p>Enter an optional offset (the first n txs which *would* have been returned will be skipped, where n == offset)</p>
+            <p><input class="offset" type="number" min="1" step="1"></p>
+            <p><input style="height: 1rem; width: 1rem; margin: 0 .5rem;" type="checkbox" class="include_unpaid" id="include_unpaid"><label for="include_unpaid">Check the box to include unsettled payments in the results</label></p>
+            <p>Select an optional invoice type (if set, only invoices of the type you selected will be returned)</p>
+            <p><select class="invoice_type"><option>------</option><option>Incoming</option><option>Outgoing</option></select></p>
+            <p><button class="list_transactions">Submit</button></p>
+            <p class="status_box">Status: <span class="list_transactions_status">Not active yet</span></p>
+        </div>
+        <script>
+            $( '.check_nwc_string' ).onclick = async () => {
+                var nwc_string = $( '.check_nwc_string_div .nwc_string' ).value;
+                var relay_is_down = false;
+                try {
+                    //ensure the string begins with the right prefix
+                    var nwc_info = nwcjs.processNWCstring( nwc_string );
+                    //ensure the string was properly converted to an object
+                    if ( typeof nwc_info === "object" ) {
+                        //ensure the object contains a valid secret & pubkey
+                        if ( !isValidHex( nwc_info.wallet_pubkey ) ) throw( 'invalid wallet pubkey' );
+                        if ( !isValidHex( nwc_info.app_privkey ) ) throw( 'invalid secret' );
+                        //warn the user if the relay only supports plaintext communications
+                        if ( nwc_info.relay.startsWith( "ws://" ) ) {
+                            $( ".check_nwc_string_status" ).innerText = `your NWC string has a potential problem, but is otherwise valid. The only potential problem is that it uses a relay starting with ws://, which is usually inadvisable as it means your messages with that relay will be unencrypted. But that is fine for testing something with your own relay, so if that exception applies to you, well and good; otherwise, do not use this NWC string.`;
+                            return;
+                        }
+                        //if the previous exception did not apply, ensure the relay supports encrypted communications
+                        if ( !nwc_info.relay.startsWith( "wss://" ) ) throw( 'invalid relay' );
+                        //test the relay
+                        var obj = {
+                            kind: 1,
+                            content: "test",
+                            tags: [],
+                            created_at: Math.floor( Date.now() / 1000 ),
+                            pubkey: nwc_info[ "app_pubkey" ],
+                        }
+                        var event = await nwcjs.getSignedEvent( obj, nwc_info[ "app_privkey" ] );
+                        $( ".check_nwc_string_status" ).innerText = `testing the relay by sending it an event...`;
+                        var event_id = await nwcjs.sendEvent( event, nwc_info[ "relay" ] );
+                        await nwcjs.waitSomeSeconds( 1 );
+                        $( ".check_nwc_string_status" ).innerText = `testing if it has the event we sent...`;
+                        var events = await nwcjs.getEvents( nwc_info[ "relay" ], [event_id], null, null, null, null, null, null, 6 );
+                        $( ".check_nwc_string_status" ).innerText = `done testing the relay`;
+                        if ( !events.length ) {
+                            relay_is_down = true;
+                            throw( `relay is down` );
+                        }
+                        //eliminate this nwc_info object from nwcjs's state and report success
+                        nwcjs.nwc_infos = [];
+                        $( ".check_nwc_string_status" ).innerText = `the NWC string is valid ✅`;
+                        return;
+                    }
+                } catch ( e ) {}
+                if ( relay_is_down ) {
+                    relay_is_down = false;
+                    $( ".check_nwc_string_status" ).innerText = `the NWC string is valid *except* it uses a relay that is currently down, as determined by this test: we sent it a message and checked if it returned it to us upon request. It didn't, so we conclude the relay is down. You are advised not to use this NWC string as a result, unless the relay is down for reasons you approve of, e.g. for temporary testing, or if, for reasons you approve of (like being a paid relay), it wouldn't pass our test anyway.`;
+                    return;
+                }
+                $( ".check_nwc_string_status" ).innerText = `the NWC string was invalid ❌.`;
             }
-            var connection_id = Object.keys( bankify.state.nostr_state.nwc_info )[ 0 ];
-            var nwc_string = bankify.state.nostr_state.nwc_info[ connection_id ].nwc_string;
-            var mymint = bankify.state.nostr_state.nwc_info[ connection_id ].mymint;
-            var permissions = bankify.state.nostr_state.nwc_info[ connection_id ].permissions;
-            var relay = bankify.state.nostr_state.nwc_info[ connection_id ].relay;
-            $( '.checking_connection' ).classList.add( "hidden" );
-            $( '.nwc_btns' ).classList.add( "hidden" );
-            $( '.nwc_string_div' ).innerHTML = `<p>Creating nwc connection...</p>`;
-            $( '.create_nwc_connection' ).classList.add( "hidden" );
-            if ( !( connection_id in bankify.state.nostr_state.sockets ) ) bankify.createNWCconnection( mymint, permissions, relay, connection_id );
-            var waitForConnection = async () => {
-                if ( bankify.state.nostr_state.sockets[ connection_id ].readyState === 1 ) return;
-                await super_nostr.waitSomeSeconds( 1 );
-                return waitForConnection();
+            $( '.check_permissions' ).onclick = async () => {
+                var nwc_string = $( '.check_permissions_div .nwc_string' ).value;
+                var nwc_info = nwcjs.processNWCstring( nwc_string );
+                $( ".check_permissions_status" ).innerText = `sending a request for permissions and waiting up to 6 seconds for a response...`;
+                var delay_tolerance = 6;
+                var wallet_info = await nwcjs.getInfo( nwc_info, delay_tolerance );
+                if ( "error" in wallet_info && wallet_info[ "error" ] ) {
+                    $( ".check_permissions_status" ).innerText = `error: ` + JSON.stringify( wallet_info[ "error" ] );
+                    return;
+                }
+                $( ".check_permissions_status" ).innerText = `This NWC string has the following permissions: ${wallet_info.result.methods.join( " " )}\n\nFull response:\n\n${JSON.stringify( wallet_info.result, null, 4 )}`;
             }
-            await waitForConnection();
-            $( '.nwc_string_div' ).innerHTML = `<p>Here is your NWC string:</p><p style="border: 1px solid black; background-color: #aaaaaa; color: black; font-family: monospace; padding: 0.5rem; max-width: 15rem; word-wrap: break-word;">${nwc_string}</p><p><button onclick="destroyConnection( '${connection_id}' )">Destroy this connection</button></p>`;
-            $( '.send_and_receive_btns' ).classList.remove( "hidden" );
-            $( '.send' ).onclick = () => {bankify.sendLN()};
-            $( '.receive' ).onclick = async () => {
-                $( '.invoice_box' ).innerText = `loading...`;
-                $( '.invoice_box' ).classList.remove( "hidden" );
-                var invoice = await bankify.receiveLN();
-                $( '.invoice_box' ).innerText = invoice;
+            $( '.make_invoice' ).onclick = async () => {
+                var nwc_string = $( '.make_invoice_div .nwc_string' ).value;
+                var nwc_info = nwcjs.processNWCstring( nwc_string );
+                var amnt = Number( $( '.invoice_amnt' ).value );
+                if ( !amnt ) return alert( `you must specify a value greater than 1` );
+                var desc = "";
+                if ( $( '.invoice_desc' ).value ) desc = $( '.invoice_desc' ).value;
+                var delay_tolerance = 6;
+                $( ".make_invoice_status" ).innerText = `sending a request for a ${amnt} sat invoice and waiting up to 6 seconds for a response...`;
+                var invoice_info = await nwcjs.makeInvoice( nwc_info, amnt, desc, delay_tolerance );
+                if ( "error" in invoice_info && invoice_info[ "error" ] ) {
+                    $( ".make_invoice_status" ).innerText = `error: ` + JSON.stringify( invoice_info[ "error" ] );
+                    return;
+                }
+                $( ".make_invoice_status" ).innerText = `The invoice was successfully retrieved and is ${invoice_info.result.invoice || invoice_info.result.bolt11}\n\nFull response:\n\n${JSON.stringify( invoice_info.result, null, 4 )}`;
             }
-            if ( bankify.state.utxos.length && !Number( $( '.balance' ).innerText ) ) $( '.balance' ).innerText = bankify.getBalance();
-        }
-        showStringLoop();
-        var destroyConnection = connection_id => {
-            delete bankify.state.nostr_state.nwc_info[ connection_id ];
-            delete bankify.state.nostr_state.sockets[ connection_id ];
-            localStorage[ "nwc_server_state" ] = JSON.stringify( bankify.state.nostr_state.nwc_info );
-            window.location.reload();
-        }
-        if ( localStorage[ "nwc_server_state" ] ) bankify.state.nostr_state.nwc_info = JSON.parse( localStorage[ "nwc_server_state" ] );
-        if ( localStorage[ "cashu_utxos" ] ) bankify.state.utxos = JSON.parse( localStorage[ "cashu_utxos" ] );
-        var saveState = async () => {
-            localStorage[ "nwc_server_state" ] = JSON.stringify( bankify.state.nostr_state.nwc_info );
-            localStorage[ "cashu_utxos" ] = JSON.stringify( bankify.state.utxos );
-            await super_nostr.waitSomeSeconds( 1 );
-            saveState();
-        }
-        saveState();
-    </script>
-</body>
+            $( '.check_invoice' ).onclick = async () => {
+                var nwc_string = $( '.check_invoice_div .nwc_string' ).value;
+                var nwc_info = nwcjs.processNWCstring( nwc_string );
+                var invoice = $( '.check_invoice_div .invoice_to_check' ).value;
+                var delay_tolerance = 6;
+                $( ".check_invoice_status" ).innerText = `sending a request for the status of that invoice and waiting up to 6 seconds for a response...`;
+                var invoice_info = await nwcjs.checkInvoice( nwc_info, invoice, delay_tolerance );
+                if ( "error" in invoice_info && invoice_info[ "error" ] ) {
+                    $( ".check_invoice_status" ).innerText = `error: ` + JSON.stringify( invoice_info[ "error" ] );
+                    return;
+                }
+                $( ".check_invoice_status" ).innerText = `The invoice status was successfully retrieved and is "${( "settled_at" in invoice_info.result && !!invoice_info.result.settled_at ) ? "paid" : "not paid"}" (determined by checking the "settled_at" parameter given below -- if it exists and has a value, we say "paid," otherwise we say "not paid")\n\nFull response:\n\n${JSON.stringify( invoice_info.result, null, 4 )}`;
+            }
+            $( '.pay_invoice' ).onclick = async () => {
+                var nwc_string = $( '.pay_invoice_div .nwc_string' ).value;
+                var nwc_info = nwcjs.processNWCstring( nwc_string );
+                var invoice = $( '.pay_invoice_div .invoice_to_pay' ).value;
+                var amnt = null;
+                $( ".pay_invoice_status" ).innerText = `Sending request...`;
+                nwcjs.tryToPayInvoice( nwc_info, invoice, amnt );
+                await nwcjs.waitSomeSeconds( 1 );
+                $( ".pay_invoice_status" ).innerText = `A request to pay the invoice was sent. Consider using "Check invoice" to view its status.`;
+            }
+            $( '.get_balance' ).onclick = async () => {
+                var nwc_string = $( '.get_balance_div .nwc_string' ).value;
+                var nwc_info = nwcjs.processNWCstring( nwc_string );
+                var delay_tolerance = 6;
+                $( ".get_balance_status" ).innerText = `sending a request for the balance and waiting up to 6 seconds for a response...`;
+                var balance_info = await nwcjs.getBalance( nwc_info, delay_tolerance );
+                if ( "error" in balance_info && balance_info[ "error" ] ) {
+                    $( ".get_balance_status" ).innerText = `error: ` + JSON.stringify( balance_info[ "error" ] );
+                    return;
+                }
+                $( ".get_balance_status" ).innerText = `The balance was successfully retrieved and is ${Math.floor( balance_info.result.balance / 1000 )} satoshis or ${balance_info.result.balance} millisatoshis\n\nFull response:\n\n${JSON.stringify( balance_info.result, null, 4 )}`;
+            }
+            $( '.list_transactions' ).onclick = async () => {
+                var nwc_string = $( '.list_transactions_div .nwc_string' ).value;
+                var nwc_info = nwcjs.processNWCstring( nwc_string );
+                var from = Number( $( '.txs_from' ).value ) || null;
+                var until = Number( $( '.txs_to' ).value ) || null;
+                var limit = Number( $( '.limit' ).value ) || null;
+                var offset = Number( $( '.offset' ).value ) || null;
+                var unpaid = $( '.include_unpaid' ).checked;
+                var type = $( '.invoice_type' ).value.toLowerCase();
+                if ( type === "------" ) type = null;
+                $( ".list_transactions_status" ).innerText = `sending a request for transactions and waiting up to 6 seconds for a response...`;
+                var delay_tolerance = 6;
+                var txs = await nwcjs.listTransactions( nwc_info, from, until, limit, offset, unpaid, type, delay_tolerance );
+                if ( "error" in txs && txs[ "error" ] ) {
+                    $( ".list_transactions_status" ).innerText = `error: ` + JSON.stringify( txs[ "error" ] );
+                    return;
+                }
+                $( ".list_transactions_status" ).innerText = JSON.stringify( txs[ "result" ][ "transactions" ], null, 4 );
+            }
+        </script>
+    </body>
 </html>
