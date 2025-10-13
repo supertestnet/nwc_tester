@@ -6,6 +6,10 @@
     <script src="https://supertestnet.github.io/nwcjs/nwcjs.js"></script>
     <script src="https://bundle.run/noble-secp256k1@1.2.14"></script>
     <script src="https://bundle.run/bech32@2.0.0"></script>
+    <script type="module">
+      import * as nostrTools from "https://unpkg.com/nostr-tools@2.7.2/lib/nostr.bundle.js";
+      window.nostrTools = nostrTools;
+    </script>
     <script>
       var isValidHex = (hex) => {
         if (!hex) return;
@@ -74,6 +78,456 @@
       var url_keys = url_params.keys();
       var $_GET = {};
       for (var key of url_keys) $_GET[key] = url_params.get(key);
+
+      // Global cache for wallet encryption support
+      var wallet_encryption_cache = {};
+
+      // Helper function to detect wallet encryption support
+      async function detectWalletEncryption(nwc_info) {
+        // Check cache first
+        if (wallet_encryption_cache[nwc_info.wallet_pubkey]) {
+          return wallet_encryption_cache[nwc_info.wallet_pubkey];
+        }
+
+        try {
+          // Fetch the info event (kind 13194) from the relay
+          var info_events = await nwcjs.getEvents(
+            nwc_info.relay,
+            null, // ids
+            [13194], // kind
+            null, // until
+            null, // since
+            1, // limit
+            null, // etags
+            null, // ptags
+            30 // delay_tolerance
+          );
+
+          // Filter to get the info event from the wallet service
+          var wallet_info_event = info_events.find(
+            (event) => event.pubkey === nwc_info.wallet_pubkey
+          );
+
+          if (!wallet_info_event) {
+            // No info event found, assume NIP-04 only
+            console.log("No info event found, defaulting to NIP-04");
+            wallet_encryption_cache[nwc_info.wallet_pubkey] = {
+              supports_nip44: false,
+              supports_nip04: true,
+              preferred: "nip04",
+            };
+            return wallet_encryption_cache[nwc_info.wallet_pubkey];
+          }
+
+          // Look for encryption tag
+          var encryption_tag = wallet_info_event.tags.find(
+            (tag) => tag[0] === "encryption"
+          );
+
+          if (!encryption_tag) {
+            // No encryption tag means NIP-04 only (legacy)
+            console.log("No encryption tag, using NIP-04");
+            wallet_encryption_cache[nwc_info.wallet_pubkey] = {
+              supports_nip44: false,
+              supports_nip04: true,
+              preferred: "nip04",
+            };
+            return wallet_encryption_cache[nwc_info.wallet_pubkey];
+          }
+
+          // Parse supported encryption schemes
+          var supported_schemes = encryption_tag[1].split(" ");
+          var supports_nip44 = supported_schemes.includes("nip44_v2");
+          var supports_nip04 = supported_schemes.includes("nip04");
+
+          console.log("Wallet supports:", supported_schemes);
+
+          wallet_encryption_cache[nwc_info.wallet_pubkey] = {
+            supports_nip44: supports_nip44,
+            supports_nip04: supports_nip04,
+            preferred: supports_nip44 ? "nip44_v2" : "nip04",
+          };
+
+          return wallet_encryption_cache[nwc_info.wallet_pubkey];
+        } catch (e) {
+          console.error("Error detecting encryption:", e);
+          // Default to NIP-04 on error
+          return {
+            supports_nip44: false,
+            supports_nip04: true,
+            preferred: "nip04",
+          };
+        }
+      }
+
+      // Helper function to encrypt with NIP-44
+      async function encryptNIP44(privkey, pubkey, text) {
+        // Wait for nostrTools to be available
+        while (!window.nostrTools) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+
+        var conversationKey =
+          window.nostrTools.nip44.v2.utils.getConversationKey(privkey, pubkey);
+        return window.nostrTools.nip44.v2.encrypt(text, conversationKey);
+      }
+
+      // Helper function to decrypt with NIP-44
+      async function decryptNIP44(privkey, pubkey, ciphertext) {
+        // Wait for nostrTools to be available
+        while (!window.nostrTools) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+
+        var conversationKey =
+          window.nostrTools.nip44.v2.utils.getConversationKey(privkey, pubkey);
+        return window.nostrTools.nip44.v2.decrypt(ciphertext, conversationKey);
+      }
+
+      // Wrapper to encrypt with the appropriate method
+      async function encryptMessage(nwc_info, text, encryption_type) {
+        if (encryption_type === "nip44_v2") {
+          return await encryptNIP44(
+            nwc_info.app_privkey,
+            nwc_info.wallet_pubkey,
+            text
+          );
+        } else {
+          // Default to NIP-04
+          return await nwcjs.encrypt(
+            nwc_info.app_privkey,
+            nwc_info.wallet_pubkey,
+            text
+          );
+        }
+      }
+
+      // Wrapper to decrypt with the appropriate method
+      async function decryptMessage(
+        privkey,
+        pubkey,
+        ciphertext,
+        encryption_type
+      ) {
+        if (encryption_type === "nip44_v2") {
+          return await decryptNIP44(privkey, pubkey, ciphertext);
+        } else {
+          // Default to NIP-04
+          return await nwcjs.decrypt(privkey, pubkey, ciphertext);
+        }
+      }
+
+      // Helper function to listen for notifications with proper encryption
+      async function listenForNotification(
+        nwc_info,
+        notificationType,
+        matchFn,
+        statusElement,
+        timeout = 60000
+      ) {
+        var start_time = Date.now();
+        var encryption_info = await detectWalletEncryption(nwc_info);
+
+        // Determine which notification kinds to listen for
+        var notification_kinds = [];
+        if (encryption_info.supports_nip04) notification_kinds.push(23196);
+        if (encryption_info.supports_nip44) notification_kinds.push(23197);
+
+        console.log("Listening for notification kinds:", notification_kinds);
+
+        var interval_id = setInterval(async () => {
+          var current_time = Date.now();
+
+          if (current_time - start_time > timeout) {
+            clearInterval(interval_id);
+            statusElement.innerText += `\nNo ${notificationType} notification received within ${
+              timeout / 1000
+            } seconds.`;
+            return;
+          }
+
+          // Fetch notification events
+          var events = await nwcjs.getEvents(
+            nwc_info.relay,
+            null,
+            notification_kinds, // Listen to both kinds
+            null,
+            Math.floor((Date.now() - timeout) / 1000),
+            null,
+            null,
+            [nwc_info.app_pubkey],
+            30
+          );
+
+          // Filter events from wallet pubkey
+          var filtered_events = events.filter(
+            (event) => event.pubkey === nwc_info.wallet_pubkey
+          );
+
+          for (var event of filtered_events) {
+            try {
+              var decrypted_content;
+
+              // Decrypt based on event kind
+              if (event.kind === 23197) {
+                // NIP-44 encryption
+                console.log("Decrypting NIP-44 notification");
+                decrypted_content = await decryptNIP44(
+                  nwc_info.app_privkey,
+                  event.pubkey,
+                  event.content
+                );
+              } else if (event.kind === 23196) {
+                // NIP-04 encryption
+                console.log("Decrypting NIP-04 notification");
+                decrypted_content = await nwcjs.decrypt(
+                  nwc_info.app_privkey,
+                  event.pubkey,
+                  event.content
+                );
+              }
+
+              var notification = JSON.parse(decrypted_content);
+
+              if (
+                notification.notification_type === notificationType &&
+                matchFn(notification.notification)
+              ) {
+                statusElement.innerText += `\n${notificationType} notification (${
+                  event.kind === 23197 ? "NIP-44" : "NIP-04"
+                }):\n${JSON.stringify(notification.notification, null, 4)}`;
+                clearInterval(interval_id);
+                return;
+              }
+            } catch (e) {
+              console.error("Error processing notification:", e);
+            }
+          }
+        }, 5000);
+      }
+
+      // Enhanced NWC command functions with NIP-44 support
+
+      async function sendNWCRequest(
+        nwc_info,
+        method,
+        params,
+        result_type,
+        seconds_of_delay_tolerable = 30
+      ) {
+        var encryption_info = await detectWalletEncryption(nwc_info);
+        var encryption_type = encryption_info.preferred;
+
+        console.log(
+          `Sending ${method} request with ${encryption_type} encryption`
+        );
+
+        var msg = JSON.stringify({
+          method: method,
+          params: params,
+        });
+
+        var emsg = await encryptMessage(nwc_info, msg, encryption_type);
+
+        var tags = [["p", nwc_info.wallet_pubkey]];
+        if (encryption_type === "nip44_v2") {
+          tags.push(["encryption", "nip44_v2"]);
+        }
+
+        var obj = {
+          kind: 23194,
+          content: emsg,
+          tags: tags,
+          created_at: Math.floor(Date.now() / 1000),
+          pubkey: nwc_info.app_pubkey,
+        };
+
+        var event = await nwcjs.getSignedEvent(obj, nwc_info.app_privkey);
+        var id = event.id;
+
+        // Set up response listener with proper decryption
+        var response_promise = getEnhancedResponse(
+          nwc_info,
+          id,
+          result_type,
+          encryption_type,
+          seconds_of_delay_tolerable
+        );
+
+        await nwcjs.waitSomeSeconds(1);
+        var relay = nwc_info.relay;
+        nwcjs.sendEvent(event, relay);
+
+        return await response_promise;
+      }
+
+      async function getEnhancedResponse(
+        nwc_info,
+        event_id,
+        result_type,
+        encryption_type,
+        seconds_of_delay_tolerable = 30
+      ) {
+        var relay = nwc_info.relay;
+        var ids = null;
+        var kinds = [23195];
+        var until = null;
+        var since = null;
+        var limit = 1;
+        var etags = [event_id];
+        var ptags = [nwc_info.app_pubkey];
+
+        var events = await nwcjs.getEvents(
+          relay,
+          ids,
+          kinds,
+          until,
+          since,
+          limit,
+          etags,
+          ptags,
+          seconds_of_delay_tolerable
+        );
+
+        if (!events.length) {
+          return {
+            result_type,
+            error: { code: "TIMEOUT", message: "Request timed out" },
+          };
+        }
+
+        var dmsg = await decryptMessage(
+          nwc_info.app_privkey,
+          events[0].pubkey,
+          events[0].content,
+          encryption_type
+        );
+        return JSON.parse(dmsg);
+      }
+
+      // Wrapper functions for each NWC command
+
+      async function enhancedGetInfo(
+        nwc_info,
+        seconds_of_delay_tolerable = 30
+      ) {
+        return await sendNWCRequest(
+          nwc_info,
+          "get_info",
+          {},
+          "get_info",
+          seconds_of_delay_tolerable
+        );
+      }
+
+      async function enhancedGetBalance(
+        nwc_info,
+        seconds_of_delay_tolerable = 30
+      ) {
+        return await sendNWCRequest(
+          nwc_info,
+          "get_balance",
+          {},
+          "get_balance",
+          seconds_of_delay_tolerable
+        );
+      }
+
+      async function enhancedMakeInvoice(
+        nwc_info,
+        amt,
+        desc,
+        seconds_of_delay_tolerable = 30
+      ) {
+        var params = {
+          amount: amt * 1000,
+          description: desc || "",
+        };
+        return await sendNWCRequest(
+          nwc_info,
+          "make_invoice",
+          params,
+          "make_invoice",
+          seconds_of_delay_tolerable
+        );
+      }
+
+      async function enhancedCheckInvoice(
+        nwc_info,
+        invoice,
+        seconds_of_delay_tolerable = 30
+      ) {
+        var params = {
+          invoice: invoice,
+          bolt11: invoice,
+        };
+        return await sendNWCRequest(
+          nwc_info,
+          "lookup_invoice",
+          params,
+          "lookup_invoice",
+          seconds_of_delay_tolerable
+        );
+      }
+
+      async function enhancedPayInvoice(nwc_info, invoice, amnt = null) {
+        var encryption_info = await detectWalletEncryption(nwc_info);
+        var encryption_type = encryption_info.preferred;
+
+        var params = { invoice: invoice };
+        if (amnt) params.amount = amnt;
+
+        var msg = JSON.stringify({
+          method: "pay_invoice",
+          params: params,
+        });
+
+        var emsg = await encryptMessage(nwc_info, msg, encryption_type);
+
+        var tags = [["p", nwc_info.wallet_pubkey]];
+        if (encryption_type === "nip44_v2") {
+          tags.push(["encryption", "nip44_v2"]);
+        }
+
+        var obj = {
+          kind: 23194,
+          content: emsg,
+          tags: tags,
+          created_at: Math.floor(Date.now() / 1000),
+          pubkey: nwc_info.app_pubkey,
+        };
+
+        var event = await nwcjs.getSignedEvent(obj, nwc_info.app_privkey);
+        var relay = nwc_info.relay;
+        nwcjs.sendEvent(event, relay);
+      }
+
+      async function enhancedListTransactions(
+        nwc_info,
+        from = null,
+        until = null,
+        limit = null,
+        offset = null,
+        unpaid = null,
+        type = undefined,
+        seconds_of_delay_tolerable = 30
+      ) {
+        var params = {};
+        if (from) params.from = from;
+        if (until) params.until = until;
+        if (limit) params.limit = limit;
+        if (offset) params.offset = offset;
+        if (unpaid) params.unpaid = unpaid;
+        if (type) params.type = type;
+
+        return await sendNWCRequest(
+          nwc_info,
+          "list_transactions",
+          params,
+          "list_transactions",
+          seconds_of_delay_tolerable
+        );
+      }
     </script>
   </head>
   <body>
@@ -288,7 +742,7 @@
           ".check_permissions_status"
         ).innerText = `sending a request for permissions and waiting up to 30 seconds for a response...`;
         var delay_tolerance = 30;
-        var wallet_info = await nwcjs.getInfo(nwc_info, delay_tolerance);
+        var wallet_info = await enhancedGetInfo(nwc_info, delay_tolerance);
         if ("error" in wallet_info && wallet_info["error"]) {
           $(".check_permissions_status").innerText =
             `error: ` + JSON.stringify(wallet_info["error"]);
@@ -311,7 +765,7 @@
         $(
           ".make_invoice_status"
         ).innerText = `sending a request for a ${amnt} sat invoice and waiting up to 30 seconds for a response...`;
-        var invoice_info = await nwcjs.makeInvoice(
+        var invoice_info = await enhancedMakeInvoice(
           nwc_info,
           amnt,
           desc,
@@ -328,85 +782,31 @@
           invoice_info.result.invoice || invoice_info.result.bolt11
         }\n\nFull response:\n\n${JSON.stringify(invoice_info.result, null, 4)}`;
 
-        // Extract payment_hash and created_at from the invoice response
+        // Extract payment_hash from the invoice response
         var payment_hash = invoice_info.result.payment_hash;
-        var invoice_created_at = invoice_info.result.created_at;
 
         // Update status to indicate listening for notifications
         $(
           ".make_invoice_status"
         ).innerText += `\nNow listening for payment_received notification for up to 60 seconds...`;
 
-        // Record the start time for the 60-second timeout
-        var start_time = Date.now();
-
-        // Set up an interval to check for notifications every 5 seconds
-        var interval_id = setInterval(async () => {
-          var current_time = Date.now();
-
-          // Check if 60 seconds have passed
-          if (current_time - start_time > 60000) {
-            clearInterval(interval_id);
-            $(
-              ".make_invoice_status"
-            ).innerText += `\nNo payment received within 60 seconds.`;
-            return;
-          }
-
-          // Fetch notification events from the relay
-          var events = await nwcjs.getEvents(
-            nwc_info.relay, // relay
-            null, // ids
-            [23196], // kinds
-            null, // until
-            invoice_created_at, // since
-            null, // limit
-            null, // etags
-            [nwc_info.app_pubkey], // ptags
-            30 // delay_tolerance
-          );
-
-          // Filter events to only include those from the wallet pubkey
-          var filtered_events = events.filter(
-            (event) => event.pubkey === nwc_info.wallet_pubkey
-          );
-
-          // Process each filtered event
-          for (var event of filtered_events) {
-            try {
-              // Decrypt the event content
-              var decrypted_content = await nwcjs.decrypt(
-                nwc_info.app_privkey,
-                event.pubkey,
-                event.content
-              );
-
-              // Parse the decrypted content
-              var notification = JSON.parse(decrypted_content);
-
-              // Check if it's the desired notification
-              if (
-                notification.notification_type === "payment_received" &&
-                notification.notification.payment_hash === payment_hash
-              ) {
-                // Display the notification data
-                $(
-                  ".make_invoice_status"
-                ).innerText += `\nPayment received notification:\n${JSON.stringify(
-                  notification.notification,
-                  null,
-                  4
-                )}`;
-
-                // Stop the interval
-                clearInterval(interval_id);
-                return;
-              }
-            } catch (e) {
-              // Ignore errors in decryption or parsing
-            }
-          }
-        }, 5000);
+        // Use the helper function to listen for notifications
+        listenForNotification(
+          nwc_info,
+          "payment_received",
+          (notification) => notification.payment_hash === payment_hash,
+          $(".make_invoice_status"),
+          60000
+        );
+      };
+        // Use the helper function to listen for notifications
+        listenForNotification(
+          nwc_info,
+          "payment_received",
+          (notification) => notification.payment_hash === payment_hash,
+          $(".make_invoice_status"),
+          60000
+        );
       };
       $(".check_invoice").onclick = async () => {
         var nwc_string = $(".check_invoice_div .nwc_string").value;
@@ -416,7 +816,7 @@
         $(
           ".check_invoice_status"
         ).innerText = `sending a request for the status of that invoice and waiting up to 30 seconds for a response...`;
-        var invoice_info = await nwcjs.checkInvoice(
+        var invoice_info = await enhancedCheckInvoice(
           nwc_info,
           invoice,
           delay_tolerance
@@ -447,7 +847,7 @@
         $(".pay_invoice_status").innerText = `Sending request...`;
 
         // Fire-and-forget payment request with error handling
-        nwcjs.tryToPayInvoice(nwc_info, invoice, amnt).catch((e) => {
+        enhancedPayInvoice(nwc_info, invoice, amnt).catch((e) => {
           $(
             ".pay_invoice_status"
           ).innerText += `\nError sending payment request: ${e.message}`;
@@ -458,76 +858,14 @@
           ".pay_invoice_status"
         ).innerText = `A request to pay the invoice was sent. Now listening for payment_sent notifications for up to 60 seconds...`;
 
-        // Record the start time for the 60-second timeout
-        var start_time = Date.now();
-
-        // Set up an interval to check for notifications every 5 seconds
-        var interval_id = setInterval(async () => {
-          var current_time = Date.now();
-
-          // Check if 60 seconds have passed
-          if (current_time - start_time > 60000) {
-            clearInterval(interval_id);
-            $(
-              ".pay_invoice_status"
-            ).innerText += `\nNo payment_sent notifications received within 60 seconds.`;
-            return;
-          }
-
-          // Fetch notification events from the relay
-          var events = await nwcjs.getEvents(
-            nwc_info.relay, // relay
-            null, // ids
-            [23196], // kinds
-            null, // until
-            Math.floor(Date.now() / 1000) - 60, // since: 60 seconds ago
-            null, // limit
-            null, // etags
-            [nwc_info.app_pubkey], // ptags
-            30 // delay_tolerance
-          );
-
-          // Filter events to only include those from the wallet pubkey
-          var filtered_events = events.filter(
-            (event) => event.pubkey === nwc_info.wallet_pubkey
-          );
-
-          // Process each filtered event
-          for (var event of filtered_events) {
-            try {
-              // Decrypt the event content
-              var decrypted_content = await nwcjs.decrypt(
-                nwc_info.app_privkey,
-                event.pubkey,
-                event.content
-              );
-
-              // Parse the decrypted content
-              var notification = JSON.parse(decrypted_content);
-
-              // Check if it's a payment_sent notification with matching invoice
-              if (
-                notification.notification_type === "payment_sent" &&
-                notification.notification.invoice === invoice
-              ) {
-                // Display the notification data
-                $(
-                  ".pay_invoice_status"
-                ).innerText += `\nPayment sent notification:\n${JSON.stringify(
-                  notification.notification,
-                  null,
-                  4
-                )}`;
-
-                // Stop the interval
-                clearInterval(interval_id);
-                return;
-              }
-            } catch (e) {
-              // Ignore errors in decryption or parsing
-            }
-          }
-        }, 5000);
+        // Use the helper function to listen for notifications
+        listenForNotification(
+          nwc_info,
+          "payment_sent",
+          (notification) => notification.invoice === invoice,
+          $(".pay_invoice_status"),
+          60000
+        );
       };
       $(".get_balance").onclick = async () => {
         var nwc_string = $(".get_balance_div .nwc_string").value;
@@ -536,7 +874,7 @@
         $(
           ".get_balance_status"
         ).innerText = `sending a request for the balance and waiting up to 30 seconds for a response...`;
-        var balance_info = await nwcjs.getBalance(nwc_info, delay_tolerance);
+        var balance_info = await enhancedGetBalance(nwc_info, delay_tolerance);
         if ("error" in balance_info && balance_info["error"]) {
           $(".get_balance_status").innerText =
             `error: ` + JSON.stringify(balance_info["error"]);
@@ -561,7 +899,7 @@
         $(
           ".get_info_status"
         ).innerText = `sending a request for wallet info and waiting up to 30 seconds for a response...`;
-        var info_response = await nwcjs.getInfo(nwc_info, delay_tolerance);
+        var info_response = await enhancedGetInfo(nwc_info, delay_tolerance);
         if ("error" in info_response && info_response["error"]) {
           $(".get_info_status").innerText =
             `error: ` + JSON.stringify(info_response["error"]);
@@ -569,6 +907,10 @@
         }
 
         var info = info_response.result;
+
+        // Also detect encryption support
+        var encryption_info = await detectWalletEncryption(nwc_info);
+
         var displayText = `Wallet Info Retrieved Successfully:\n\n`;
         displayText += `Alias: ${info.alias || "N/A"}\n`;
         displayText += `Public Key: ${info.pubkey || "N/A"}\n`;
@@ -576,6 +918,10 @@
         displayText += `Block Height: ${info.block_height || "N/A"}\n`;
         displayText += `Block Hash: ${info.block_hash || "N/A"}\n`;
         displayText += `Color: ${info.color || "N/A"}\n`;
+        displayText += `\nEncryption Support:\n`;
+        displayText += `  NIP-44: ${encryption_info.supports_nip44 ? '✅ Supported' : '❌ Not supported'}\n`;
+        displayText += `  NIP-04: ${encryption_info.supports_nip04 ? '✅ Supported' : '❌ Not supported'}\n`;
+        displayText += `  Preferred: ${encryption_info.preferred.toUpperCase()}\n`;
         displayText += `\nSupported Methods: ${
           info.methods ? info.methods.join(", ") : "N/A"
         }\n`;
@@ -600,7 +946,7 @@
           ".list_transactions_status"
         ).innerText = `sending a request for transactions and waiting up to 30 seconds for a response...`;
         var delay_tolerance = 30;
-        var txs = await nwcjs.listTransactions(
+        var txs = await enhancedListTransactions(
           nwc_info,
           from,
           until,
