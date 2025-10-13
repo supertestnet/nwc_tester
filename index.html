@@ -79,15 +79,45 @@
       var $_GET = {};
       for (var key of url_keys) $_GET[key] = url_params.get(key);
 
+      // Welcome banner
+      console.log(
+        "%c🔐 NWC Tester with NIP-44 Support",
+        "font-size: 20px; font-weight: bold; color: #4CAF50;"
+      );
+      console.log(
+        "%cThis tester supports both NIP-04 and NIP-44 encryption",
+        "font-size: 14px; color: #2196F3;"
+      );
+      console.log(
+        "%cWatch this console to see the encryption negotiation process!",
+        "font-size: 12px; color: #FF9800;"
+      );
+      console.log(
+        "═══════════════════════════════════════════════════════════\n"
+      );
+
       // Global cache for wallet encryption support
       var wallet_encryption_cache = {};
 
       // Helper function to detect wallet encryption support
       async function detectWalletEncryption(nwc_info) {
+        console.log(
+          "🔍 [Encryption Detection] Starting encryption detection for wallet:",
+          nwc_info.wallet_pubkey.substring(0, 8) + "..."
+        );
+
         // Check cache first
         if (wallet_encryption_cache[nwc_info.wallet_pubkey]) {
+          console.log(
+            "✅ [Encryption Detection] Using cached encryption info:",
+            wallet_encryption_cache[nwc_info.wallet_pubkey]
+          );
           return wallet_encryption_cache[nwc_info.wallet_pubkey];
         }
+
+        console.log(
+          "📡 [Encryption Detection] Fetching info event (kind 13194) from relay..."
+        );
 
         try {
           // Fetch the info event (kind 13194) from the relay
@@ -110,14 +140,24 @@
 
           if (!wallet_info_event) {
             // No info event found, assume NIP-04 only
-            console.log("No info event found, defaulting to NIP-04");
+            console.log(
+              "⚠️ [Encryption Detection] No info event found, defaulting to NIP-04"
+            );
             wallet_encryption_cache[nwc_info.wallet_pubkey] = {
               supports_nip44: false,
               supports_nip04: true,
               preferred: "nip04",
             };
+            console.log(
+              "📋 [Encryption Detection] Cached result:",
+              wallet_encryption_cache[nwc_info.wallet_pubkey]
+            );
             return wallet_encryption_cache[nwc_info.wallet_pubkey];
           }
+
+          console.log(
+            "✅ [Encryption Detection] Info event found, checking for encryption tag..."
+          );
 
           // Look for encryption tag
           var encryption_tag = wallet_info_event.tags.find(
@@ -126,12 +166,18 @@
 
           if (!encryption_tag) {
             // No encryption tag means NIP-04 only (legacy)
-            console.log("No encryption tag, using NIP-04");
+            console.log(
+              "⚠️ [Encryption Detection] No encryption tag found, using NIP-04 (legacy wallet)"
+            );
             wallet_encryption_cache[nwc_info.wallet_pubkey] = {
               supports_nip44: false,
               supports_nip04: true,
               preferred: "nip04",
             };
+            console.log(
+              "📋 [Encryption Detection] Cached result:",
+              wallet_encryption_cache[nwc_info.wallet_pubkey]
+            );
             return wallet_encryption_cache[nwc_info.wallet_pubkey];
           }
 
@@ -140,17 +186,35 @@
           var supports_nip44 = supported_schemes.includes("nip44_v2");
           var supports_nip04 = supported_schemes.includes("nip04");
 
-          console.log("Wallet supports:", supported_schemes);
+          console.log(
+            "🎯 [Encryption Detection] Wallet supports:",
+            supported_schemes
+          );
+          console.log("   • NIP-44:", supports_nip44 ? "✅ YES" : "❌ NO");
+          console.log("   • NIP-04:", supports_nip04 ? "✅ YES" : "❌ NO");
+
+          var preferred = supports_nip44 ? "nip44_v2" : "nip04";
+          console.log(
+            "⭐ [Encryption Detection] Preferred encryption:",
+            preferred.toUpperCase()
+          );
 
           wallet_encryption_cache[nwc_info.wallet_pubkey] = {
             supports_nip44: supports_nip44,
             supports_nip04: supports_nip04,
-            preferred: supports_nip44 ? "nip44_v2" : "nip04",
+            preferred: preferred,
           };
 
+          console.log(
+            "📋 [Encryption Detection] Cached result:",
+            wallet_encryption_cache[nwc_info.wallet_pubkey]
+          );
           return wallet_encryption_cache[nwc_info.wallet_pubkey];
         } catch (e) {
-          console.error("Error detecting encryption:", e);
+          console.error(
+            "❌ [Encryption Detection] Error detecting encryption:",
+            e
+          );
           // Default to NIP-04 on error
           return {
             supports_nip44: false,
@@ -162,6 +226,8 @@
 
       // Helper function to encrypt with NIP-44
       async function encryptNIP44(privkey, pubkey, text) {
+        console.log("🔐 [NIP-44 Encrypt] Encrypting message with NIP-44...");
+
         // Wait for nostrTools to be available
         while (!window.nostrTools) {
           await new Promise((resolve) => setTimeout(resolve, 100));
@@ -169,11 +235,19 @@
 
         var conversationKey =
           window.nostrTools.nip44.v2.utils.getConversationKey(privkey, pubkey);
-        return window.nostrTools.nip44.v2.encrypt(text, conversationKey);
+        var encrypted = window.nostrTools.nip44.v2.encrypt(
+          text,
+          conversationKey
+        );
+
+        console.log("✅ [NIP-44 Encrypt] Message encrypted successfully");
+        return encrypted;
       }
 
       // Helper function to decrypt with NIP-44
       async function decryptNIP44(privkey, pubkey, ciphertext) {
+        console.log("🔓 [NIP-44 Decrypt] Decrypting message with NIP-44...");
+
         // Wait for nostrTools to be available
         while (!window.nostrTools) {
           await new Promise((resolve) => setTimeout(resolve, 100));
@@ -181,11 +255,21 @@
 
         var conversationKey =
           window.nostrTools.nip44.v2.utils.getConversationKey(privkey, pubkey);
-        return window.nostrTools.nip44.v2.decrypt(ciphertext, conversationKey);
+        var decrypted = window.nostrTools.nip44.v2.decrypt(
+          ciphertext,
+          conversationKey
+        );
+
+        console.log("✅ [NIP-44 Decrypt] Message decrypted successfully");
+        return decrypted;
       }
 
       // Wrapper to encrypt with the appropriate method
       async function encryptMessage(nwc_info, text, encryption_type) {
+        console.log(
+          `🔐 [Encrypt] Using ${encryption_type.toUpperCase()} encryption`
+        );
+
         if (encryption_type === "nip44_v2") {
           return await encryptNIP44(
             nwc_info.app_privkey,
@@ -194,11 +278,14 @@
           );
         } else {
           // Default to NIP-04
-          return await nwcjs.encrypt(
+          console.log("🔐 [NIP-04 Encrypt] Encrypting message with NIP-04...");
+          var encrypted = await nwcjs.encrypt(
             nwc_info.app_privkey,
             nwc_info.wallet_pubkey,
             text
           );
+          console.log("✅ [NIP-04 Encrypt] Message encrypted successfully");
+          return encrypted;
         }
       }
 
@@ -209,11 +296,18 @@
         ciphertext,
         encryption_type
       ) {
+        console.log(
+          `🔓 [Decrypt] Using ${encryption_type.toUpperCase()} decryption`
+        );
+
         if (encryption_type === "nip44_v2") {
           return await decryptNIP44(privkey, pubkey, ciphertext);
         } else {
           // Default to NIP-04
-          return await nwcjs.decrypt(privkey, pubkey, ciphertext);
+          console.log("🔓 [NIP-04 Decrypt] Decrypting message with NIP-04...");
+          var decrypted = await nwcjs.decrypt(privkey, pubkey, ciphertext);
+          console.log("✅ [NIP-04 Decrypt] Message decrypted successfully");
+          return decrypted;
         }
       }
 
@@ -225,6 +319,10 @@
         statusElement,
         timeout = 60000
       ) {
+        console.log(
+          `👂 [Notifications] Starting to listen for ${notificationType} notifications...`
+        );
+
         var start_time = Date.now();
         var encryption_info = await detectWalletEncryption(nwc_info);
 
@@ -233,7 +331,18 @@
         if (encryption_info.supports_nip04) notification_kinds.push(23196);
         if (encryption_info.supports_nip44) notification_kinds.push(23197);
 
-        console.log("Listening for notification kinds:", notification_kinds);
+        console.log(
+          "👂 [Notifications] Listening for notification kinds:",
+          notification_kinds
+        );
+        console.log(
+          "   • Kind 23196 (NIP-04):",
+          encryption_info.supports_nip04 ? "✅" : "❌"
+        );
+        console.log(
+          "   • Kind 23197 (NIP-44):",
+          encryption_info.supports_nip44 ? "✅" : "❌"
+        );
 
         var interval_id = setInterval(async () => {
           var current_time = Date.now();
@@ -271,7 +380,9 @@
               // Decrypt based on event kind
               if (event.kind === 23197) {
                 // NIP-44 encryption
-                console.log("Decrypting NIP-44 notification");
+                console.log(
+                  "🔓 [Notifications] Decrypting NIP-44 notification (kind 23197)"
+                );
                 decrypted_content = await decryptNIP44(
                   nwc_info.app_privkey,
                   event.pubkey,
@@ -279,7 +390,9 @@
                 );
               } else if (event.kind === 23196) {
                 // NIP-04 encryption
-                console.log("Decrypting NIP-04 notification");
+                console.log(
+                  "🔓 [Notifications] Decrypting NIP-04 notification (kind 23196)"
+                );
                 decrypted_content = await nwcjs.decrypt(
                   nwc_info.app_privkey,
                   event.pubkey,
@@ -288,19 +401,34 @@
               }
 
               var notification = JSON.parse(decrypted_content);
+              console.log(
+                "📨 [Notifications] Notification received:",
+                notification.notification_type
+              );
 
               if (
                 notification.notification_type === notificationType &&
                 matchFn(notification.notification)
               ) {
+                console.log("✅ [Notifications] Matching notification found!", {
+                  type: notificationType,
+                  encryption: event.kind === 23197 ? "NIP-44" : "NIP-04",
+                });
                 statusElement.innerText += `\n${notificationType} notification (${
                   event.kind === 23197 ? "NIP-44" : "NIP-04"
                 }):\n${JSON.stringify(notification.notification, null, 4)}`;
                 clearInterval(interval_id);
                 return;
+              } else {
+                console.log(
+                  "⏭️ [Notifications] Notification doesn't match criteria, continuing to listen..."
+                );
               }
             } catch (e) {
-              console.error("Error processing notification:", e);
+              console.error(
+                "❌ [Notifications] Error processing notification:",
+                e
+              );
             }
           }
         }, 5000);
@@ -315,11 +443,16 @@
         result_type,
         seconds_of_delay_tolerable = 30
       ) {
+        console.log(
+          `\n📤 [NWC Request] ========================================`
+        );
+        console.log(`📤 [NWC Request] Preparing ${method} request...`);
+
         var encryption_info = await detectWalletEncryption(nwc_info);
         var encryption_type = encryption_info.preferred;
 
         console.log(
-          `Sending ${method} request with ${encryption_type} encryption`
+          `📤 [NWC Request] Sending ${method} with ${encryption_type.toUpperCase()} encryption`
         );
 
         var msg = JSON.stringify({
@@ -327,11 +460,18 @@
           params: params,
         });
 
+        console.log(`📤 [NWC Request] Request payload:`, params);
+
         var emsg = await encryptMessage(nwc_info, msg, encryption_type);
 
         var tags = [["p", nwc_info.wallet_pubkey]];
         if (encryption_type === "nip44_v2") {
           tags.push(["encryption", "nip44_v2"]);
+          console.log(`📤 [NWC Request] Added encryption tag: nip44_v2`);
+        } else {
+          console.log(
+            `📤 [NWC Request] Using legacy NIP-04 (no encryption tag)`
+          );
         }
 
         var obj = {
@@ -344,6 +484,8 @@
 
         var event = await nwcjs.getSignedEvent(obj, nwc_info.app_privkey);
         var id = event.id;
+
+        console.log(`📤 [NWC Request] Event ID:`, id.substring(0, 16) + "...");
 
         // Set up response listener with proper decryption
         var response_promise = getEnhancedResponse(
@@ -358,6 +500,10 @@
         var relay = nwc_info.relay;
         nwcjs.sendEvent(event, relay);
 
+        console.log(
+          `📤 [NWC Request] Request sent to relay, waiting for response...`
+        );
+
         return await response_promise;
       }
 
@@ -368,6 +514,10 @@
         encryption_type,
         seconds_of_delay_tolerable = 30
       ) {
+        console.log(
+          `📥 [NWC Response] Waiting for ${result_type} response (timeout: ${seconds_of_delay_tolerable}s)...`
+        );
+
         var relay = nwc_info.relay;
         var ids = null;
         var kinds = [23195];
@@ -390,11 +540,18 @@
         );
 
         if (!events.length) {
+          console.error(
+            `❌ [NWC Response] Request timed out after ${seconds_of_delay_tolerable}s`
+          );
           return {
             result_type,
             error: { code: "TIMEOUT", message: "Request timed out" },
           };
         }
+
+        console.log(
+          `📥 [NWC Response] Response received, decrypting with ${encryption_type.toUpperCase()}...`
+        );
 
         var dmsg = await decryptMessage(
           nwc_info.app_privkey,
@@ -402,7 +559,22 @@
           events[0].content,
           encryption_type
         );
-        return JSON.parse(dmsg);
+
+        var response = JSON.parse(dmsg);
+
+        if (response.error) {
+          console.error(`❌ [NWC Response] Error in response:`, response.error);
+        } else {
+          console.log(
+            `✅ [NWC Response] ${result_type} completed successfully`
+          );
+        }
+
+        console.log(
+          `📥 [NWC Response] ========================================\n`
+        );
+
+        return response;
       }
 
       // Wrapper functions for each NWC command
@@ -471,8 +643,17 @@
       }
 
       async function enhancedPayInvoice(nwc_info, invoice, amnt = null) {
+        console.log(
+          `\n⚡ [Pay Invoice] ========================================`
+        );
+        console.log(`⚡ [Pay Invoice] Preparing payment request...`);
+
         var encryption_info = await detectWalletEncryption(nwc_info);
         var encryption_type = encryption_info.preferred;
+
+        console.log(
+          `⚡ [Pay Invoice] Using ${encryption_type.toUpperCase()} encryption`
+        );
 
         var params = { invoice: invoice };
         if (amnt) params.amount = amnt;
@@ -487,6 +668,11 @@
         var tags = [["p", nwc_info.wallet_pubkey]];
         if (encryption_type === "nip44_v2") {
           tags.push(["encryption", "nip44_v2"]);
+          console.log(`⚡ [Pay Invoice] Added encryption tag: nip44_v2`);
+        } else {
+          console.log(
+            `⚡ [Pay Invoice] Using legacy NIP-04 (no encryption tag)`
+          );
         }
 
         var obj = {
@@ -500,6 +686,11 @@
         var event = await nwcjs.getSignedEvent(obj, nwc_info.app_privkey);
         var relay = nwc_info.relay;
         nwcjs.sendEvent(event, relay);
+
+        console.log(`⚡ [Pay Invoice] Payment request sent (fire-and-forget)`);
+        console.log(
+          `⚡ [Pay Invoice] ========================================\n`
+        );
       }
 
       async function enhancedListTransactions(
